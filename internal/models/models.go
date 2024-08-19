@@ -1,8 +1,10 @@
 package models
 
 type ESPNResponse struct {
-	Teams   []Team   `json:"teams"`
-	Members []Member `json:"members"`
+	Teams    []Team     `json:"teams"`
+	Members  []Member   `json:"members"`
+	Schedule []Schedule `json:"schedule"`
+	Status   Status     `json:"status"`
 }
 
 type Member struct {
@@ -38,4 +40,25 @@ type Team struct {
 	WaiverRank            int         `json:"waiverRank"`
 
 	Member Member
+}
+
+type Schedule struct {
+	Away            TeamSchedule `json:"away"`
+	Home            TeamSchedule `json:"home"`
+	Id              int          `json:"id"`
+	MatchupPeriodId int          `json:"matchupPeriodId"`
+	PlayoffTierType string       `json:"playoffTierType"`
+	Winner          string       `json:"winner"`
+}
+
+type TeamSchedule struct {
+	Adjustment                    float32     `json:"adjustment"`
+	RosterForMatchupPeriodDelayed interface{} `json:"rosterForMatchupPeriodDelayed"`
+	TeamId                        int         `json:"teamId"`
+	Tiebreak                      float32     `json:"tiebreak"`
+	TotalPoints                   float32     `json:"totalPoints"`
+}
+
+type Status struct {
+	CurrentMatchupPeriod int `json:"currentMatchupPeriod"`
 }

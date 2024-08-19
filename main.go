@@ -22,8 +22,7 @@ var (
 
 func main() {
 	client := &http.Client{}
-	// ?view=mMatchupScore&view=mStatus&view=mSettings&view=mTeam&view=modular&view=mNav
-	url := fmt.Sprintf("%s%s%s?view=mTeam", BASE_URL, "/seasons/2024/segments/0/leagues/", LEAGUE_ID)
+	url := fmt.Sprintf("%s%s%s?view=mMatchupScore&view=mStatus&view=mSettings&view=mTeam&view=modular&view=mNav", BASE_URL, "/seasons/2024/segments/0/leagues/", LEAGUE_ID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Print(err.Error())
@@ -49,13 +48,27 @@ func main() {
 		fmt.Print(err.Error())
 	}
 
+	teamsToId := map[int]models.Team{}
+
 	for _, team := range espnResp.Teams {
+		teamsToId[team.Id] = team
+
 		for _, member := range espnResp.Members {
 			if member.Id == team.PrimaryOwner {
 				team.Member = member
 				break
 			}
 		}
+
 		fmt.Printf("Team %s is owned by: %s %s\n", team.Name, team.Member.FristName, team.Member.LastName)
+	}
+
+	for _, s := range espnResp.Schedule {
+		if s.MatchupPeriodId == espnResp.Status.CurrentMatchupPeriod {
+			home := teamsToId[s.Home.TeamId]
+			away := teamsToId[s.Away.TeamId]
+
+			fmt.Printf("the current matchup is home: %s vs away %s\n", home.Name, away.Name)
+		}
 	}
 }
