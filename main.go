@@ -27,48 +27,27 @@ var (
 	}
 )
 
-type MatchupResponse struct {
-	CurrentMatchups []CurrentMatchup `json:"currentMatchups"`
-	Teams           []TeamInfo       `json:"teams"`
-	Schedule        []ScheduleItem   `json:"schedule"`
-}
-
-type CurrentMatchup struct {
-	Home TeamInfo `json:"home"`
-	Away TeamInfo `json:"away"`
+type TeamResponse struct {
+	Teams []TeamInfo `json:"teams"`
 }
 
 type TeamInfo struct {
-	Id     int     `json:"id"`
-	Name   string  `json:"name"`
-	Owner  string  `json:"owner"`
-	Points float32 `json:"points"`
-}
-
-type ScheduleItem struct {
-	Id              int                `json:"id"`
-	MatchupPeriodId int                `json:"matchupPeriodId"`
-	PlayoffTierType string             `json:"playoffTierType"`
-	Winner          string             `json:"winner"`
-	Home            ScheduleTeamInfo   `json:"home"`
-	Away            ScheduleTeamInfo   `json:"away"`
-}
-
-type ScheduleTeamInfo struct {
-	TeamId          int     `json:"teamId"`
-	TotalPoints     float32 `json:"totalPoints"`
-	TotalPointsLive float32 `json:"totalPointsLive"`
+	Id           int     `json:"id"`
+	Name         string  `json:"name"`
+	Owner        string  `json:"owner"`
+	CurrentScore float32 `json:"currentScore"`
+	PlayoffSeed  int     `json:"playoffSeed"`
 }
 
 func main() {
-	http.HandleFunc("/v1/matchups", matchupsHandler)
+	http.HandleFunc("/v1/teams", teamsHandler)
 
 	log.Println("Server starting on :8001")
 	log.Fatal(http.ListenAndServe(":8001", nil))
 }
 
-func matchupsHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Matchups handler called")
+func teamsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("Teams handler called")
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -147,96 +126,57 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find current matchups
-	var currentMatchups []CurrentMatchup
-	for _, s := range espnResp.Schedule {
-		if s.MatchupPeriodId == espnResp.Status.CurrentMatchupPeriod {
-			home := teamsToId[s.Home.TeamId]
-			away := teamsToId[s.Away.TeamId]
-
-			currentMatchups = append(currentMatchups, CurrentMatchup{
-				Home: TeamInfo{
-					Id:     home.Id,
-					Name:   home.Name,
-					Owner:  fmt.Sprintf("%s %s", home.Member.FristName, home.Member.LastName),
-					Points: s.Home.TotalPointsLive, // Use live scores for current matchups
-				},
-				Away: TeamInfo{
-					Id:     away.Id,
-					Name:   away.Name,
-					Owner:  fmt.Sprintf("%s %s", away.Member.FristName, away.Member.LastName),
-					Points: s.Away.TotalPointsLive, // Use live scores for current matchups
-				},
-			})
-		}
-	}
-
-	// Convert teams to response format
+	// Convert teams to response format with current scores
 	var teams []TeamInfo
 	for _, team := range teamsToId {
+		currentScore := getCurrentScore(espnResp, team.Id)
 		teams = append(teams, TeamInfo{
-			Id:     team.Id,
-			Name:   team.Name,
-			Owner:  fmt.Sprintf("%s %s", team.Member.FristName, team.Member.LastName),
-			Points: team.Points,
+			Id:           team.Id,
+			Name:         team.Name,
+			Owner:        fmt.Sprintf("%s %s", team.Member.FristName, team.Member.LastName),
+			CurrentScore: currentScore,
+			PlayoffSeed:  team.PlayoffSeed,
 		})
 	}
 
-	// Convert schedule to response format
-	var scheduleItems []ScheduleItem
-	for _, s := range espnResp.Schedule {
-		scheduleItems = append(scheduleItems, ScheduleItem{
-			Id:              s.Id,
-			MatchupPeriodId: s.MatchupPeriodId,
-			PlayoffTierType: s.PlayoffTierType,
-			Winner:          s.Winner,
-			Home: ScheduleTeamInfo{
-				TeamId:          s.Home.TeamId,
-				TotalPoints:     s.Home.TotalPoints,
-				TotalPointsLive: s.Home.TotalPointsLive,
-			},
-			Away: ScheduleTeamInfo{
-				TeamId:          s.Away.TeamId,
-				TotalPoints:     s.Away.TotalPoints,
-				TotalPointsLive: s.Away.TotalPointsLive,
-			},
-		})
+	// Create simplified response
+	response := TeamResponse{
+		Teams: teams,
 	}
 
-	// Create response
-	response := MatchupResponse{
-		CurrentMatchups: currentMatchups,
-		Teams:           teams,
-		Schedule:        scheduleItems,
-	}
-
-	// Print current scores to console
-	printCurrentScores(currentMatchups)
+	// Print team information to console
+	printTeamInfo(teams)
 
 	// Send JSON response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
 
-func printCurrentScores(matchups []CurrentMatchup) {
-	fmt.Println("\n=== CURRENT FANTASY FOOTBALL SCORES ===")
-	if len(matchups) == 0 {
-		fmt.Println("No current matchups found.")
-		return
-	}
-	
-	for i, matchup := range matchups {
-		fmt.Printf("\nMatchup %d:\n", i+1)
-		fmt.Printf("  %s (%s): %.2f points\n", matchup.Home.Name, matchup.Home.Owner, matchup.Home.Points)
-		fmt.Printf("  %s (%s): %.2f points\n", matchup.Away.Name, matchup.Away.Owner, matchup.Away.Points)
-		
-		if matchup.Home.Points > matchup.Away.Points {
-			fmt.Printf("  🏆 %s is winning!\n", matchup.Home.Name)
-		} else if matchup.Away.Points > matchup.Home.Points {
-			fmt.Printf("  🏆 %s is winning!\n", matchup.Away.Name)
-		} else {
-			fmt.Printf("  🤝 It's a tie!\n")
+func getCurrentScore(espnResp models.ESPNResponse, teamId int) float32 {
+	// Look for the team's current live score in the schedule
+	for _, s := range espnResp.Schedule {
+		if s.MatchupPeriodId == espnResp.Status.CurrentMatchupPeriod {
+			if s.Home.TeamId == teamId {
+				return s.Home.TotalPointsLive
+			}
+			if s.Away.TeamId == teamId {
+				return s.Away.TotalPointsLive
+			}
 		}
 	}
-	fmt.Println("=====================================\n")
+	return 0.0 // Return 0 if no current score found
+}
+
+func printTeamInfo(teams []TeamInfo) {
+	fmt.Println("\n=== FANTASY FOOTBALL TEAMS ===")
+	if len(teams) == 0 {
+		fmt.Println("No teams found.")
+		return
+	}
+
+	for _, team := range teams {
+		fmt.Printf("Seed %d: %s (%s) - %.2f points\n",
+			team.PlayoffSeed, team.Name, team.Owner, team.CurrentScore)
+	}
+	fmt.Println("=============================\n")
 }
