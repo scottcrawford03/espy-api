@@ -30,6 +30,7 @@ var (
 type MatchupResponse struct {
 	CurrentMatchups []CurrentMatchup `json:"currentMatchups"`
 	Teams           []TeamInfo       `json:"teams"`
+	Schedule        []ScheduleItem   `json:"schedule"`
 }
 
 type CurrentMatchup struct {
@@ -44,6 +45,21 @@ type TeamInfo struct {
 	Points float32 `json:"points"`
 }
 
+type ScheduleItem struct {
+	Id              int                `json:"id"`
+	MatchupPeriodId int                `json:"matchupPeriodId"`
+	PlayoffTierType string             `json:"playoffTierType"`
+	Winner          string             `json:"winner"`
+	Home            ScheduleTeamInfo   `json:"home"`
+	Away            ScheduleTeamInfo   `json:"away"`
+}
+
+type ScheduleTeamInfo struct {
+	TeamId          int     `json:"teamId"`
+	TotalPoints     float32 `json:"totalPoints"`
+	TotalPointsLive float32 `json:"totalPointsLive"`
+}
+
 func main() {
 	http.HandleFunc("/v1/matchups", matchupsHandler)
 
@@ -52,6 +68,7 @@ func main() {
 }
 
 func matchupsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("Matchups handler called")
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -68,6 +85,7 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("getting espn_s2")
 	espn_s2 := r.URL.Query().Get("espn_s2")
 	if espn_s2 == "" {
 		http.Error(w, "espn_s2 is required", http.StatusBadRequest)
@@ -83,6 +101,7 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("%s%s%s?view=mMatchupScore&view=mStatus&view=mSettings&view=mTeam&view=modular&view=mNav", BASE_URL, "/seasons/2025/segments/0/leagues/", LEAGUE_ID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		log.Printf("Error creating request: %v", err)
 		http.Error(w, fmt.Sprintf("Error creating request: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -94,6 +113,7 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Error making request: %v", err)
 		http.Error(w, fmt.Sprintf("Error making request: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -104,6 +124,7 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Error reading response: %v", err), http.StatusInternalServerError)
 		return
 	}
+	fmt.Println("Body: ", string(body))
 
 	espnResp := models.ESPNResponse{}
 	err = json.Unmarshal(body, &espnResp)
@@ -138,21 +159,16 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 					Id:     home.Id,
 					Name:   home.Name,
 					Owner:  fmt.Sprintf("%s %s", home.Member.FristName, home.Member.LastName),
-					Points: s.Home.TotalPoints,
+					Points: s.Home.TotalPointsLive, // Use live scores for current matchups
 				},
 				Away: TeamInfo{
 					Id:     away.Id,
 					Name:   away.Name,
 					Owner:  fmt.Sprintf("%s %s", away.Member.FristName, away.Member.LastName),
-					Points: s.Away.TotalPoints,
+					Points: s.Away.TotalPointsLive, // Use live scores for current matchups
 				},
 			})
 		}
-	}
-
-	// Create response
-	response := MatchupResponse{
-		CurrentMatchups: currentMatchups,
 	}
 
 	// Convert teams to response format
@@ -165,9 +181,62 @@ func matchupsHandler(w http.ResponseWriter, r *http.Request) {
 			Points: team.Points,
 		})
 	}
-	response.Teams = teams
+
+	// Convert schedule to response format
+	var scheduleItems []ScheduleItem
+	for _, s := range espnResp.Schedule {
+		scheduleItems = append(scheduleItems, ScheduleItem{
+			Id:              s.Id,
+			MatchupPeriodId: s.MatchupPeriodId,
+			PlayoffTierType: s.PlayoffTierType,
+			Winner:          s.Winner,
+			Home: ScheduleTeamInfo{
+				TeamId:          s.Home.TeamId,
+				TotalPoints:     s.Home.TotalPoints,
+				TotalPointsLive: s.Home.TotalPointsLive,
+			},
+			Away: ScheduleTeamInfo{
+				TeamId:          s.Away.TeamId,
+				TotalPoints:     s.Away.TotalPoints,
+				TotalPointsLive: s.Away.TotalPointsLive,
+			},
+		})
+	}
+
+	// Create response
+	response := MatchupResponse{
+		CurrentMatchups: currentMatchups,
+		Teams:           teams,
+		Schedule:        scheduleItems,
+	}
+
+	// Print current scores to console
+	printCurrentScores(currentMatchups)
 
 	// Send JSON response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+func printCurrentScores(matchups []CurrentMatchup) {
+	fmt.Println("\n=== CURRENT FANTASY FOOTBALL SCORES ===")
+	if len(matchups) == 0 {
+		fmt.Println("No current matchups found.")
+		return
+	}
+	
+	for i, matchup := range matchups {
+		fmt.Printf("\nMatchup %d:\n", i+1)
+		fmt.Printf("  %s (%s): %.2f points\n", matchup.Home.Name, matchup.Home.Owner, matchup.Home.Points)
+		fmt.Printf("  %s (%s): %.2f points\n", matchup.Away.Name, matchup.Away.Owner, matchup.Away.Points)
+		
+		if matchup.Home.Points > matchup.Away.Points {
+			fmt.Printf("  🏆 %s is winning!\n", matchup.Home.Name)
+		} else if matchup.Away.Points > matchup.Home.Points {
+			fmt.Printf("  🏆 %s is winning!\n", matchup.Away.Name)
+		} else {
+			fmt.Printf("  🤝 It's a tie!\n")
+		}
+	}
+	fmt.Println("=====================================\n")
 }

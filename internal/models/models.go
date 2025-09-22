@@ -57,6 +57,8 @@ type TeamSchedule struct {
 	TeamId                        int         `json:"teamId"`
 	Tiebreak                      float32     `json:"tiebreak"`
 	TotalPoints                   float32     `json:"totalPoints"`
+	TotalPointsLive               float32     `json:"totalPointsLive"`
+	TotalProjectedPointsLive      float32     `json:"totalProjectedPointsLive"`
 }
 
 type Status struct {
